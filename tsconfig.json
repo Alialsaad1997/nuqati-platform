@@ -1,0 +1,264 @@
+'use client'
+import { useState, useEffect, useRef } from 'react'
+import { supabase } from '@/lib/supabase'
+import { Merchant, Profile } from '@/types'
+import { formatCurrency, calculatePoints, calculateCashback } from '@/lib/utils'
+
+type ScanResult = {
+  success: boolean
+  customer_name: string
+  loyalty_type: string
+  current_balance: number
+  points_added?: number
+  stamps_count?: number
+  stamp_target?: number
+  cashback_added?: number
+  completed?: boolean
+  reward?: string
+  card_id: string
+}
+
+export default function EmployeePage() {
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [merchant, setMerchant] = useState<Merchant | null>(null)
+  const [qrInput, setQrInput] = useState('')
+  const [amount, setAmount] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<ScanResult | null>(null)
+  const [error, setError] = useState('')
+  const [step, setStep] = useState<'scan' | 'amount' | 'done'>('scan')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    loadProfile()
+  }, [])
+
+  const loadProfile = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { window.location.href = '/auth/login'; return }
+
+    const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+    setProfile(p)
+
+    if (p?.merchant_id) {
+      const { data: m } = await supabase.from('merchants').select('*').eq('id', p.merchant_id).single()
+      setMerchant(m)
+    }
+  }
+
+  const handleScanSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!qrInput.trim()) return
+    setStep('amount')
+    setError('')
+  }
+
+  const handleProcess = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!amount || !qrInput || !merchant || !profile) return
+    setLoading(true)
+    setError('')
+
+    const amountNum = parseFloat(amount)
+
+    // البحث عن البطاقة بالـ QR Token
+    const { data: card, error: cardError } = await supabase
+      .from('loyalty_cards')
+      .select('*, customer:profiles(*)')
+      .eq('qr_token', qrInput.trim())
+      .eq('merchant_id', merchant.id)
+      .single()
+
+    if (cardError || !card) {
+      setError('رمز QR غير صالح أو لا ينتمي لهذا المتجر')
+      setLoading(false)
+      return
+    }
+
+    // معالجة حسب نوع الولاء
+    if (merchant.loyalty_type === 'stamp') {
+      const { data, error } = await supabase.rpc('add_stamp', {
+        p_card_id: card.id,
+        p_employee_id: profile.id,
+        p_amount: amountNum
+      })
+      if (error) { setError('حدث خطأ أثناء المعالجة'); setLoading(false); return }
+      setResult({
+        success: true,
+        customer_name: (card.customer as any)?.full_name || 'الزبون',
+        loyalty_type: 'stamp',
+        current_balance: data.stamps_count,
+        stamps_count: data.stamps_count,
+        stamp_target: merchant.stamp_target,
+        completed: data.completed,
+        reward: data.reward,
+        card_id: card.id
+      })
+    } else if (merchant.loyalty_type === 'points') {
+      const pointsToAdd = calculatePoints(amountNum, merchant.points_per_amount, merchant.amount_per_point)
+      await supabase.from('loyalty_cards').update({
+        points_balance: card.points_balance + pointsToAdd,
+        total_spent: card.total_spent + amountNum
+      }).eq('id', card.id)
+      await supabase.from('transactions').insert({
+        card_id: card.id, customer_id: card.customer_id,
+        merchant_id: merchant.id, employee_id: profile.id,
+        transaction_type: 'earn', amount: amountNum, points_change: pointsToAdd
+      })
+      setResult({
+        success: true,
+        customer_name: (card.customer as any)?.full_name || 'الزبون',
+        loyalty_type: 'points',
+        current_balance: card.points_balance + pointsToAdd,
+        points_added: pointsToAdd,
+        card_id: card.id
+      })
+    } else if (merchant.loyalty_type === 'cashback') {
+      const cashbackToAdd = calculateCashback(amountNum, merchant.cashback_percentage)
+      await supabase.from('loyalty_cards').update({
+        cashback_balance: card.cashback_balance + cashbackToAdd,
+        total_spent: card.total_spent + amountNum
+      }).eq('id', card.id)
+      await supabase.from('transactions').insert({
+        card_id: card.id, customer_id: card.customer_id,
+        merchant_id: merchant.id, employee_id: profile.id,
+        transaction_type: 'cashback_earn', amount: amountNum, cashback_change: cashbackToAdd
+      })
+      setResult({
+        success: true,
+        customer_name: (card.customer as any)?.full_name || 'الزبون',
+        loyalty_type: 'cashback',
+        current_balance: card.cashback_balance + cashbackToAdd,
+        cashback_added: cashbackToAdd,
+        card_id: card.id
+      })
+    }
+
+    setStep('done')
+    setLoading(false)
+  }
+
+  const reset = () => {
+    setQrInput(''); setAmount(''); setResult(null); setError(''); setStep('scan')
+    setTimeout(() => inputRef.current?.focus(), 100)
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+      {/* Header */}
+      <header className="bg-gray-800 px-4 py-4 flex items-center justify-between">
+        <div>
+          <h1 className="font-bold text-lg">⭐ نقاطي — موظف</h1>
+          <p className="text-gray-400 text-sm">{merchant?.name} | {profile?.full_name}</p>
+        </div>
+        <button onClick={() => { supabase.auth.signOut(); window.location.href = '/' }}
+          className="text-red-400 text-sm hover:text-red-300">خروج</button>
+      </header>
+
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+
+          {/* خطوة 1: المسح */}
+          {step === 'scan' && (
+            <div className="bg-gray-800 rounded-3xl p-6 text-center">
+              <div className="text-6xl mb-4">📷</div>
+              <h2 className="text-xl font-bold mb-2">مسح رمز QR</h2>
+              <p className="text-gray-400 text-sm mb-6">أدخل رمز QR الخاص بالزبون أو امسحه</p>
+              <form onSubmit={handleScanSubmit}>
+                <input
+                  ref={inputRef}
+                  autoFocus
+                  className="w-full bg-gray-700 text-white text-center text-lg border border-gray-600 rounded-2xl px-4 py-4 mb-4 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500"
+                  placeholder="امسح الرمز هنا..."
+                  value={qrInput}
+                  onChange={e => setQrInput(e.target.value)}
+                />
+                <button type="submit" className="btn-primary w-full py-4 text-lg rounded-2xl">
+                  التالي ←
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* خطوة 2: إدخال المبلغ */}
+          {step === 'amount' && (
+            <div className="bg-gray-800 rounded-3xl p-6 text-center">
+              <div className="text-6xl mb-4">💵</div>
+              <h2 className="text-xl font-bold mb-2">أدخل مبلغ الفاتورة</h2>
+              <p className="text-gray-400 text-sm mb-2">
+                {merchant?.loyalty_type === 'stamp' && `كل ${merchant.stamp_target} أختام = ${merchant.stamp_reward}`}
+                {merchant?.loyalty_type === 'points' && `كل ${formatCurrency(merchant.amount_per_point)} = ${merchant.points_per_amount} نقطة`}
+                {merchant?.loyalty_type === 'cashback' && `كاش باك ${merchant.cashback_percentage}%`}
+              </p>
+              <form onSubmit={handleProcess} className="mt-4">
+                <input
+                  autoFocus
+                  type="number"
+                  className="w-full bg-gray-700 text-white text-center text-3xl font-bold border border-gray-600 rounded-2xl px-4 py-4 mb-2 focus:outline-none focus:border-primary-500"
+                  placeholder="0"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  min="0"
+                  step="500"
+                  required
+                />
+                <p className="text-gray-400 text-sm mb-4">دينار عراقي</p>
+                {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setStep('scan')} className="btn-secondary flex-1 py-3 rounded-2xl">
+                    ← رجوع
+                  </button>
+                  <button type="submit" disabled={loading} className="btn-primary flex-1 py-3 text-lg rounded-2xl">
+                    {loading ? '...' : 'تأكيد ✓'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* خطوة 3: النتيجة */}
+          {step === 'done' && result && (
+            <div className="bg-gray-800 rounded-3xl p-6 text-center">
+              {result.completed ? (
+                <>
+                  <div className="text-6xl mb-3">🎉</div>
+                  <h2 className="text-2xl font-extrabold text-yellow-400 mb-1">مبروك!</h2>
+                  <p className="text-white text-lg mb-1">{result.customer_name}</p>
+                  <p className="text-gray-300 mb-6">اكتملت البطاقة! المكافأة: <span className="text-yellow-400 font-bold">{result.reward}</span></p>
+                </>
+              ) : (
+                <>
+                  <div className="text-6xl mb-3">✅</div>
+                  <h2 className="text-2xl font-extrabold text-primary-400 mb-1">تمت العملية!</h2>
+                  <p className="text-white text-lg mb-1">{result.customer_name}</p>
+                </>
+              )}
+
+              <div className="bg-gray-700 rounded-2xl p-4 mb-6 text-right space-y-2">
+                {result.loyalty_type === 'stamp' && (
+                  <p className="text-gray-300">الأختام: <span className="text-white font-bold">{result.stamps_count} / {result.stamp_target}</span></p>
+                )}
+                {result.loyalty_type === 'points' && (
+                  <>
+                    <p className="text-gray-300">النقاط المضافة: <span className="text-primary-400 font-bold">+{result.points_added}</span></p>
+                    <p className="text-gray-300">الرصيد الكلي: <span className="text-white font-bold">{result.current_balance}</span></p>
+                  </>
+                )}
+                {result.loyalty_type === 'cashback' && (
+                  <>
+                    <p className="text-gray-300">الكاش باك المضاف: <span className="text-primary-400 font-bold">+{formatCurrency(result.cashback_added || 0)}</span></p>
+                    <p className="text-gray-300">الرصيد الكلي: <span className="text-white font-bold">{formatCurrency(result.current_balance)}</span></p>
+                  </>
+                )}
+              </div>
+
+              <button onClick={reset} className="btn-primary w-full py-4 text-lg rounded-2xl">
+                عملية جديدة ←
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

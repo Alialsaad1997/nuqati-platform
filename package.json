@@ -1,0 +1,59 @@
+import Link from 'next/link'
+
+export default function HomePage() {
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-primary-900 via-primary-700 to-primary-500 flex flex-col items-center justify-center text-white px-4">
+      <div className="text-center max-w-2xl mx-auto">
+        {/* Logo */}
+        <div className="mb-8">
+          <div className="inline-flex items-center justify-center w-24 h-24 bg-white/20 rounded-3xl backdrop-blur-sm mb-4">
+            <span className="text-5xl">⭐</span>
+          </div>
+          <h1 className="text-6xl font-extrabold tracking-tight mb-2">نقاطي</h1>
+          <p className="text-primary-200 text-xl font-light">منصة الولاء الرقمي</p>
+        </div>
+
+        {/* Description */}
+        <p className="text-white/80 text-lg mb-12 leading-relaxed">
+          ربط التجار بعملائهم عبر نظام مكافآت ذكي وعصري. 
+          أختام، نقاط، وكاش باك — كل شيء في مكان واحد.
+        </p>
+
+        {/* CTA Buttons */}
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <Link
+            href="/auth/login"
+            className="bg-white text-primary-700 font-bold py-4 px-8 rounded-2xl text-lg hover:bg-primary-50 transition-all duration-200 shadow-lg hover:shadow-xl"
+          >
+            تسجيل الدخول
+          </Link>
+          <Link
+            href="/auth/register"
+            className="bg-white/20 backdrop-blur-sm text-white font-bold py-4 px-8 rounded-2xl text-lg hover:bg-white/30 transition-all duration-200 border border-white/30"
+          >
+            إنشاء حساب
+          </Link>
+        </div>
+
+        {/* Features */}
+        <div className="grid grid-cols-3 gap-6 mt-16 text-center">
+          <div className="bg-white/10 rounded-2xl p-4 backdrop-blur-sm">
+            <div className="text-3xl mb-2">🎯</div>
+            <p className="font-semibold">نظام الأختام</p>
+            <p className="text-primary-200 text-sm mt-1">اكسب ختماً مع كل شراء</p>
+          </div>
+          <div className="bg-white/10 rounded-2xl p-4 backdrop-blur-sm">
+            <div className="text-3xl mb-2">💰</div>
+            <p className="font-semibold">الكاش باك</p>
+            <p className="text-primary-200 text-sm mt-1">استرجع نسبة من مشترياتك</p>
+          </div>
+          <div className="bg-white/10 rounded-2xl p-4 backdrop-blur-sm">
+            <div className="text-3xl mb-2">⭐</div>
+            <p className="font-semibold">نقاط الولاء</p>
+            <p className="text-primary-200 text-sm mt-1">جمّع النقاط واستبدلها</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  )
+}

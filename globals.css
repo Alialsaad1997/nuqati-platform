@@ -1,0 +1,77 @@
+'use client'
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
+import { Profile } from '@/types'
+import { formatDate } from '@/lib/utils'
+
+const roleLabel: Record<string, { label: string; color: string }> = {
+  super_admin: { label: 'سوبر أدمن', color: 'bg-purple-100 text-purple-700' },
+  merchant_admin: { label: 'أدمن تاجر', color: 'bg-blue-100 text-blue-700' },
+  employee: { label: 'موظف', color: 'bg-orange-100 text-orange-700' },
+  customer: { label: 'زبون', color: 'bg-green-100 text-green-700' },
+}
+
+export default function AdminUsersPage() {
+  const [users, setUsers] = useState<Profile[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState('all')
+
+  useEffect(() => { load() }, [])
+
+  const load = async () => {
+    const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
+    setUsers(data || [])
+    setLoading(false)
+  }
+
+  const filtered = users.filter(u => {
+    const matchRole = roleFilter === 'all' || u.role === roleFilter
+    const matchSearch = !search || u.full_name?.includes(search) || u.phone?.includes(search)
+    return matchRole && matchSearch
+  })
+
+  if (loading) return <div className="flex items-center justify-center h-full"><div className="w-10 h-10 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" /></div>
+
+  return (
+    <div className="p-8">
+      <h1 className="text-2xl font-extrabold text-gray-900 mb-6">إدارة المستخدمين</h1>
+      <div className="card mb-4 flex gap-4">
+        <input className="input flex-1" placeholder="🔍 بحث بالاسم أو الهاتف..." value={search} onChange={e => setSearch(e.target.value)} />
+        <select className="input w-48" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+          <option value="all">كل الأدوار</option>
+          <option value="customer">زبون</option>
+          <option value="employee">موظف</option>
+          <option value="merchant_admin">أدمن تاجر</option>
+          <option value="super_admin">سوبر أدمن</option>
+        </select>
+      </div>
+      <div className="card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-100">
+              <th className="text-right py-3 px-4 text-gray-500 font-medium">الاسم</th>
+              <th className="text-right py-3 px-4 text-gray-500 font-medium">الهاتف</th>
+              <th className="text-right py-3 px-4 text-gray-500 font-medium">الدور</th>
+              <th className="text-right py-3 px-4 text-gray-500 font-medium">تاريخ التسجيل</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(u => (
+              <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50">
+                <td className="py-3 px-4 font-medium text-gray-900">{u.full_name}</td>
+                <td className="py-3 px-4 text-gray-600">{u.phone || '—'}</td>
+                <td className="py-3 px-4">
+                  <span className={`text-xs px-3 py-1 rounded-full font-medium ${roleLabel[u.role]?.color}`}>
+                    {roleLabel[u.role]?.label}
+                  </span>
+                </td>
+                <td className="py-3 px-4 text-gray-400">{formatDate(u.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
